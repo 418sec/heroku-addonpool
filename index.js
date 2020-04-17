@@ -26,7 +26,7 @@ module.exports = function HerokuAddonPool(id, app, opt) {
       if(w[0].search(opt.config)<0) return;
       const key = w[0].substring(0, w[0].length-4);
       const val = {'value': w[1].substring(1, w[1].length-1)};
-      cp.exec(`~/heroku addons:info ${key} --app ${app}`, (err, stdout) => {
+      cp.execFile('heroku', ['addons:info', key, '--app', app], (err, stdout) => {
         if(err) return frej(err);
         for(var r of stdout.toString().match(/[^\r\n]+/g)) {
           var k = _camel(r.startsWith('=')? 'name' : r.split(':')[0]);
@@ -40,7 +40,7 @@ module.exports = function HerokuAddonPool(id, app, opt) {
 
   const supplySet = function() {
     return new Promise((fres, frej) => {
-      cp.exec(`~/heroku config -s --app ${app}`, (err, stdout) => {
+      cp.execFile('heroku', ['config', '-s', '--app', app], (err, stdout) => {
         if(err) return frej(err);
         var pro = Promise.resolve();
         for(var cfg of stdout.toString().match(/[^\r\n]+/g)||[])
@@ -77,15 +77,16 @@ module.exports = function HerokuAddonPool(id, app, opt) {
   const supplyReset = function(key) {
     log(`supplyReset(${key})`);
     const plan = supply.get(key).plan;
-    return new Promise((fres, frej) => cp.exec(
-      `~/heroku addons:destroy ${key} -a ${app} --confirm ${app} >/dev/null && `+
-      `~/heroku addons:create ${plan} --as ${key} -a ${app} >/dev/null && `+
-      `~/heroku config -s -a ${app} | grep ^${key}`,
-      (err, stdout) => {
-        const r = stdout.toString();
-        fres(supply.get(key).value = r.substring(r.indexOf('=')+2, r.length-2));
-      }
-    ));
+    return new Promise((fres, frej) => {
+      cp.execFile('heroku', ['addons:destroy', key, '-a', app, '--confirm', app], () => {
+        cp.execFile('heroku', ['addons:create', plan, '--as', key, '-a', app], () => {
+          cp.execFile('heroku', ['config', '-s', '-a', app], (err, stdout) => {
+              const r = stdout.toString().split('\n').find(a => a.startsWith(key));
+              fres(supply.get(key).value = r.substring(r.indexOf('=')+2, r.length-2));
+          })
+        })
+      });
+  });
   };
 
   const pendingRemove = function() {
